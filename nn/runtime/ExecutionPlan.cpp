@@ -1544,6 +1544,16 @@ public:
         device->getSupportedOperations(slicer->getModel(), slicer, &mSupportsOperationByIndex);
     }
 
+    /// M: NeuroPilot Performance @{
+    void initializeExt(PlanModelSlicer* slicer, std::shared_ptr<Device> device,
+            const ModelBuilder* model) {
+        if (!const_cast<ModelBuilder*>(model)->getSupportedOperations(
+                &mSupportsOperationByIndex, device)) {
+            initialize(slicer, device);
+        }
+    }
+    /// M: NeuroPilot Performance @}
+
     bool check(size_t operationIndex) const { return mSupportsOperationByIndex[operationIndex]; }
 
 private:
@@ -1559,7 +1569,9 @@ int ModelBuilder::findBestDeviceForEachOperation(
     const size_t deviceCount = devices.size();
     std::vector<CanDo> canDo(deviceCount);
     for (size_t deviceIndex = 0; deviceIndex < deviceCount; deviceIndex++) {
-        canDo[deviceIndex].initialize(&slicer, devices[deviceIndex]);
+        /// M: NeuroPilot Performance @{
+        canDo[deviceIndex].initializeExt(&slicer, devices[deviceIndex], this);
+        /// M: NeuroPilot Performance @}
     }
 
     // Figure out the best driver for each operation.

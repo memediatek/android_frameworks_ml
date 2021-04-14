@@ -70,15 +70,25 @@ struct ModelArgumentInfo {
     int updateDimensionInfo(const Operand& operand, const ANeuralNetworksOperandType* newType);
 };
 
+/// M: NeuroPilot @{
+#define UNUSED(expr) (void) expr;
+/// @}
+
 class ExecutionBuilder {
     friend class StepExecutor;
 public:
     ExecutionBuilder(const CompilationBuilder* compilation);
+    /// M: NeuroPilot @{
+    virtual ~ExecutionBuilder() {};
+    /// @}
 
-    int setInput(uint32_t index, const ANeuralNetworksOperandType* type, const void* buffer,
-                 size_t length);
-    int setInputFromMemory(uint32_t index, const ANeuralNetworksOperandType* type,
-                           const Memory* memory, size_t offset, size_t length);
+    /// M: NeuroPilot @{
+    virtual int setInput(uint32_t index, const ANeuralNetworksOperandType* type,
+                         const void* buffer, size_t length);
+    virtual int setInputFromMemory(uint32_t index, const ANeuralNetworksOperandType* type,
+                                   const Memory* memory, size_t offset, size_t length);
+    /// M: NeuroPilot @}
+
     int setOutput(uint32_t index, const ANeuralNetworksOperandType* type, void* buffer,
                   size_t length);
     int setOutputFromMemory(uint32_t index, const ANeuralNetworksOperandType* type,
@@ -109,6 +119,25 @@ public:
     const ModelBuilder* getModel() const { return mModel; }
 
     ErrorStatus finish(ErrorStatus error, const std::vector<OutputShape>& outputShapes);
+
+   protected:
+    /// Profiler @{
+    const ExecutionPlan* getPlan() const { return mPlan; }
+
+    const std::vector<ModelArgumentInfo> getOutputs() const { return mOutputs; }
+
+    const MemoryTracker &getMemories() {
+        return mMemories;
+    }
+    /// @}
+
+    /// M: Eara Qos @{
+    virtual int addExecutionExtraParam(MemoryTracker *mMemories, Memory* memory) {
+        UNUSED(mMemories)
+        UNUSED(memory)
+        return ANEURALNETWORKS_NO_ERROR;
+    }
+    /// M: Eara Qos @}
 
    private:
     // If a callback is provided, then this is asynchronous. If a callback is
@@ -229,6 +258,21 @@ class StepExecutor {
     void setExecutionStep(const std::shared_ptr<const ExecutionStep>& step) {
         mExecutionStep = step;
     }
+
+    /// M: Profiler @{
+        ExecutionBuilder* getExecutionBuilder() { return mExecutionBuilder; }
+        std::shared_ptr<Device> getDevice() { return mDevice; };
+    /// M: @}
+
+    // Execution Result
+    const std::vector<ModelArgumentInfo> getOutputs() {
+        return mOutputs;
+    }
+
+    const MemoryTracker &getMemories() {
+        return mMemories;
+    }
+    /// @}
 
    private:
     int allocatePointerArgumentsToPool(std::vector<ModelArgumentInfo>* args, Memory* memory);

@@ -48,15 +48,26 @@ public:
 
     int setCaching(const std::string& cacheDir, const uint8_t* token);
 
-    int finish();
+    /// M: Partition Extension @{
+    virtual int finish();
+    /// @}
 
-    int createExecution(ExecutionBuilder** execution);
+    /// M: NeuroPilot add on @{
+    virtual int createExecution(ExecutionBuilder** execution);
+    /// @}
 
     int createBurst(BurstBuilder** burst);
 
     const ExecutionPlan& forTest_getExecutionPlan() const { return mPlan; }
 
-private:
+    /// M: NeuroPilot add on @{
+    virtual ~CompilationBuilder() {}
+    /// @}
+
+/// M: NeuroPilot: These variables will be used in child class @{
+protected:
+/// @}
+// private:
     const ModelBuilder* mModel;
 
     ExecutionPlan mPlan;

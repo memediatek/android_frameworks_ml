@@ -49,6 +49,7 @@ bool ModelBuilder::badState(const char* name) {
 
 int ModelBuilder::getExtensionType(const char* extensionName, uint16_t typeWithinExtension,
                                    int32_t* type) {
+    replicateExtensionInfo(extensionName, typeWithinExtension, type);
     return TypeManager::get()->getExtensionType(extensionName, typeWithinExtension, type)
                    ? ANEURALNETWORKS_NO_ERROR
                    : ANEURALNETWORKS_BAD_DATA;
@@ -463,6 +464,9 @@ int ModelBuilder::finish() {
         mInvalidModel = true;
         return ANEURALNETWORKS_BAD_DATA;
     }
+    /// M: Sports Mode @{
+    checkSportsMode();
+    /// M: @}
     if (VLOG_IS_ON(MODEL)) {
         graphDump("ModelBuilder::finish", modelForValidation, nullptr);
     }

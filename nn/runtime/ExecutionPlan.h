@@ -233,6 +233,12 @@ public:
         temporaryToDefiningStep.insert(std::make_pair(fromModelIndex, stepIndex));
     }
 
+    /// M: Profiler @{
+    uint32_t getExecutionStep(std::shared_ptr<Controller> controller) const {
+        return (uint32_t)(controller->mNextStepIndex);
+    }
+    /// @}
+
     void dump() const;
 
     void reset();

@@ -28,6 +28,10 @@
 namespace android {
 namespace nn {
 
+/// M: NeuroPilot @{
+#define UNUSED(expr) (void) expr;
+/// @}
+
 class CompilationBuilder;
 class Device;
 class ExecutionPlan;
@@ -55,18 +59,21 @@ class ModelBuilder {
     bool isComputationFloat32RelaxedToFloat16() const { return mRelaxComputationFloat32toFloat16; }
 
     int finish();
+
     bool isFinished() const { return mCompletedModel; }
     bool isValid() const { return !mInvalidModel; }
 
     bool hasOEMOperation() const { return mHasOEMOperation; }
     bool hasExtensionOperation() const { return mHasExtensionOperation; }
 
+    /// M: NeuroPilot add on @{
     // explicitDeviceList is true if the list of devices was provided explicitly
     // via the ANeuralNetworksModel_createForDevices API (which has certain
     // special semantics) and false otherwise.
-    int createCompilation(CompilationBuilder** compilation,
+    virtual int createCompilation(CompilationBuilder** compilation,
                           const std::vector<std::shared_ptr<Device>>& devices,
                           bool explicitDeviceList = false);
+    /// @}
 
     void setHidlModel(Model* model) const;
 
@@ -102,22 +109,80 @@ class ModelBuilder {
     int partitionTheWork(const std::vector<std::shared_ptr<Device>>& devices, uint32_t preference,
                          ExecutionPlan* plan) const;
 
+    /// M: NeuroPilot add on @{
+    virtual ~ModelBuilder() {}
+    /// @}
+
+    /// M: Enhance Performance @{
+    virtual bool getSupportedOperations(hidl_vec<bool>* outSupportedOperations,
+                                        std::shared_ptr<Device> device) const {
+        UNUSED(outSupportedOperations)
+        UNUSED(device)
+        return false;
+    }
+    /// @}
+
+   /// M: NeuroPilot: These variables will be used in child class @{
+   protected:
+    /// M: Partition Extension @{
+    int findBestDeviceForEachOperation(uint32_t preference,
+                                       const std::vector<std::shared_ptr<Device>>& devices,
+                                       std::vector<int>* bestDeviceForOperation) const;
+    // @}
+
+    /// M: Performance enhancement @{
+    PerformanceInfo getPerformanceInfo(const std::shared_ptr<Device> device,
+                                       uint32_t operationIndex) const;
+    /// @}
+
+    /// M: For Debug @{
+    // Sorts the operations to be in the correct order for single threaded
+    // node-at-a-time execution.
+    virtual void sortIntoRunOrder();
+    /// M: @}
+
+    /// M: Sports Mode @{
+    virtual int checkSportsMode() { return ANEURALNETWORKS_NO_ERROR; }
+    /// M: @}
+
+    virtual int replicateExtensionInfo(const char* extensionName,
+            uint16_t typeWithinExtension, int32_t* type) {
+        UNUSED(extensionName);
+        UNUSED(typeWithinExtension);
+        UNUSED(type);
+        return ANEURALNETWORKS_NO_ERROR;
+    }
+
+    // Once the model has been finished, we should not allow further
+    // modifications to the model.
+    bool mCompletedModel = false;
+
+    // Any invalid manipulation of the model will mark the model invalid.
+    // No further modifications are allowed to the model.
+    bool mInvalidModel = false;
+
+   /// @}
+
    private:
     // TODO: move partitionTheWork, findBestDeviceForEachOperation,
     // sortIntoRunOrder to CompilationBuilder?
 
-    int findBestDeviceForEachOperation(uint32_t preference,
-                                       const std::vector<std::shared_ptr<Device>>& devices,
-                                       std::vector<int>* bestDeviceForOperation) const;
-    PerformanceInfo getPerformanceInfo(const std::shared_ptr<Device> device,
-                                       uint32_t operationIndex) const;
+    /// M: Partition Extension @{
+    // int findBestDeviceForEachOperation(uint32_t preference,
+    //                                   const std::vector<std::shared_ptr<Device>>& devices,
+    //                                   std::vector<int>* bestDeviceForOperation) const;
+    // @}
+    /// M: Performance enhancement @{
+    // PerformanceInfo getPerformanceInfo(const std::shared_ptr<Device> device,
+    //                                   uint32_t operationIndex) const;
+    /// @}
 
     // Return true if either mCompleteModel or mInvalidModel is true.
     bool badState(const char* name);
 
     // Sorts the operations to be in the correct order for single threaded
     // node-at-a-time execution.
-    void sortIntoRunOrder();
+    // void sortIntoRunOrder();
 
     // Copies the large values to a shared memory, if we have any.
     int copyLargeValuesToSharedMemory();
@@ -162,11 +227,11 @@ class ModelBuilder {
 
     // Once the model has been finished, we should not allow further
     // modifications to the model.
-    bool mCompletedModel = false;
+    // bool mCompletedModel = false;
 
     // Any invalid manipulation of the model will mark the model invalid.
     // No further modifications are allowed to the model.
-    bool mInvalidModel = false;
+    // bool mInvalidModel = false;
 
 
     // 'true' indicates TENSOR_FLOAT32 may be calculated with range and/or

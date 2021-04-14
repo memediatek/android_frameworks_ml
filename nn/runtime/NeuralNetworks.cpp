@@ -40,6 +40,10 @@
 #include <memory>
 #include <vector>
 
+/// M: NeuroPilot @{
+#include "NeuroPilotPrivate.h"
+/// @}
+
 // Make sure the constants defined in the header files have not changed values.
 // IMPORTANT: When adding new values, update kNumberOfDataTypes or kNumberOfDataTypesOEM
 // in Utils.h.
@@ -863,6 +867,14 @@ int ANeuralNetworksModel_create(ANeuralNetworksModel** model) {
         LOG(ERROR) << "ANeuralNetworksModel_create passed a nullptr";
         return ANEURALNETWORKS_UNEXPECTED_NULL;
     }
+
+    /// M: NeuroPilot @{
+    if (ANeuroPilotModelPrivate_makeModelBuilder(model) == ANEURALNETWORKS_NO_ERROR) {
+        LOG(DEBUG) << "ANeuralNetworksModel_create MTK model.";
+        return ANEURALNETWORKS_NO_ERROR;
+    }
+    /// @}
+
     ModelBuilder* m = new (std::nothrow) ModelBuilder();
     if (m == nullptr) {
         *model = nullptr;

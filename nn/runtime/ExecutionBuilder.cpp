@@ -33,6 +33,10 @@
 #include <thread>
 #include <vector>
 
+/// M: NeuroPilot @{
+#include "NeuroPilotPrivate.h"
+/// @}
+
 namespace android {
 namespace nn {
 
@@ -383,6 +387,11 @@ static void cpuFallbackFull(ExecutionBuilder* executionBuilder,
                             const sp<ExecutionCallback>& executionCallback) {
     NNTRACE_RT(NNTRACE_PHASE_EXECUTION, "cpuFallbackFull");
     VLOG(EXECUTION) << "cpuFallbackFull";
+    /// M: Profiler @{
+    ANeuroPilotExecutionPrivate_setCurrentExecutionStep(
+            reinterpret_cast<ANeuralNetworksExecution*>(
+            const_cast<ExecutionBuilder*>(executionBuilder)), 0);
+    /// @}
     StepExecutor executor(executionBuilder, executionBuilder->getModel(),
                           DeviceManager::getCpuDevice(), /*preparedModel=*/nullptr);
     executor.mapInputsAndOutputsTrivially();
@@ -452,6 +461,12 @@ static void asyncStartComputePartitioned(ExecutionBuilder* executionBuilder,
     Timing timing = kNoTiming;
     executionBuilder->initializeOutputShapes(&outputShapes);
     while (true) {
+        /// M: Profiler @{
+        ANeuroPilotExecutionPrivate_setCurrentExecutionStep(
+                reinterpret_cast<ANeuralNetworksExecution*>(
+                const_cast<ExecutionBuilder*>(executionBuilder)),
+                plan->getExecutionStep(controller));
+        /// @}
         std::shared_ptr<StepExecutor> executor;
         VLOG(EXECUTION) << "looking for next StepExecutor";
         std::shared_ptr<ExecutionBurstController> burstController = nullptr;
@@ -525,6 +540,11 @@ int ExecutionBuilder::compute(sp<ExecutionCallback>* synchronizationCallback,
                               BurstBuilder* burstBuilder) {
     CHECK(synchronizationCallback == nullptr || burstBuilder == nullptr)
             << "synchronizationCallback and burstBuilder cannot simultaneously be used";
+
+    /// M: Profiler @{
+    ANeuroPilotExecutionPrivate_clearProfilerInfo(
+            reinterpret_cast<ANeuralNetworksExecution*>(this));
+    /// @}
 
     const bool synchronous = (synchronizationCallback == nullptr);
 
@@ -877,6 +897,11 @@ int StepExecutor::startComputeOnDevice(
     Request request;
     setRequestArgumentArray(mInputs, &request.inputs);
     setRequestArgumentArray(mOutputs, &request.outputs);
+
+    /// M: Eara Qos @{
+    Memory extra;
+    mExecutionBuilder->addExecutionExtraParam(&mMemories, &extra);
+    /// M: @}
     uint32_t count = mMemories.size();
     request.pools.resize(count);
     for (uint32_t i = 0; i < count; i++) {
@@ -897,6 +922,11 @@ int StepExecutor::startComputeOnDevice(
     // TODO: Explain the "dead callback" problem further, either here or
     // in the design document.
     sp<ExecutionCallback> executionCallback = new ExecutionCallback();
+
+    /// M: Profiler @{
+    int result = ANeuroPilotExecutionPrivate_startProfile(
+            reinterpret_cast<ANeuralNetworksStepExecutor*>(this), getDevice()->getName());
+    /// @}
 
     // compute using burst if present
     const bool burstCompute = (burstController != nullptr);
@@ -960,6 +990,16 @@ int StepExecutor::startComputeOnDevice(
     Return<ErrorStatus> callbackStatus = executionCallback->getStatus();
     if (!callbackStatus.isOk() || callbackStatus != ErrorStatus::NONE) {
         VLOG(EXECUTION) << "**Execution failed**";
+        /// M: Profiler @{
+        if (result == ANEURALNETWORKS_NO_ERROR) {
+            ANeuroPilotExecutionPrivate_stopProfile(
+                    reinterpret_cast<ANeuralNetworksStepExecutor*>(this),
+                    reinterpret_cast<ANeuralNetworksRequest*>(const_cast<Request*> (&request)),
+                    callbackStatus.isOk()
+                    ? convertErrorStatusToResultCode(callbackStatus)
+                    : ANEURALNETWORKS_OP_FAILED);
+        }
+        /// @}
         if (callbackStatus == ErrorStatus::OUTPUT_INSUFFICIENT_SIZE) {
             *synchronizationCallback = executionCallback;
             return ANEURALNETWORKS_NO_ERROR;
@@ -986,6 +1026,14 @@ int StepExecutor::startComputeOnDevice(
             memcpy(info.buffer, data + loc.offset, loc.length);
         }
     }
+    /// M: Profiler @{
+    if (result == ANEURALNETWORKS_NO_ERROR) {
+        ANeuroPilotExecutionPrivate_stopProfile(
+                reinterpret_cast<ANeuralNetworksStepExecutor*>(this),
+                reinterpret_cast<ANeuralNetworksRequest*>(const_cast<Request*> (&request)),
+                ANEURALNETWORKS_NO_ERROR);
+    }
+    /// @}
     VLOG(EXECUTION) << "StepExecutor::startComputeOnDevice completed";
 
     *synchronizationCallback = executionCallback;
@@ -1003,6 +1051,35 @@ static void computeOnCpu(const Model& model, const Request& request,
     executionCallback->notify_1_2(convertResultCodeToErrorStatus(err), outputShapes, kNoTiming);
 }
 
+static void computeOnCpuExt(const Model& model, const Request& request,
+                         const std::vector<RunTimePoolInfo>& modelPoolInfos,
+                         const std::vector<RunTimePoolInfo>& requestPoolInfos,
+                         const sp<IExecutionCallback>& executionCallback,
+                         StepExecutor *stepExecutor) {
+    if (!ANeuroPilotUtilsPrivate_isProfilerSupported()) {
+        return computeOnCpu(model, request, modelPoolInfos, requestPoolInfos, executionCallback);
+    }
+
+    NNTRACE_RT(NNTRACE_PHASE_EXECUTION, "computeOnCpuExt");
+    CpuExecutor executor;
+    /// M: Profiler @{
+    int result = ANeuroPilotExecutionPrivate_startProfile(
+            reinterpret_cast<ANeuralNetworksStepExecutor*>(stepExecutor),
+            DeviceManager::getCpuDevice()->getName());
+    /// @}
+    int err = executor.run(model, request, modelPoolInfos, requestPoolInfos);
+    /// M: Profiler @{
+    if (result == ANEURALNETWORKS_NO_ERROR) {
+        ANeuroPilotExecutionPrivate_stopProfile(
+                reinterpret_cast<ANeuralNetworksStepExecutor*> (stepExecutor),
+                reinterpret_cast<ANeuralNetworksRequest*>(const_cast<Request*> (&request)),
+                err);
+    }
+    /// @}
+    const auto& outputShapes = executor.getOutputShapes();
+    executionCallback->notify_1_2(convertResultCodeToErrorStatus(err), outputShapes, kNoTiming);
+}
+
 int StepExecutor::startComputeOnCpu(sp<ExecutionCallback>* synchronizationCallback) {
     // TODO: use a thread pool
     // TODO(mikie): this could have NNTRACE so we could measure the overhead of
@@ -1010,6 +1087,13 @@ int StepExecutor::startComputeOnCpu(sp<ExecutionCallback>* synchronizationCallba
 
     Model model;
     mModel->setHidlModel(&model);
+
+    /// M: NeuroPilot @{
+    // Sometimes we don't want using CPU to execute operation.
+    if (ANeuroPilotUtilsPrivate_forbidCpuExecution()) {
+        return ANEURALNETWORKS_BAD_STATE;
+    }
+    /// M: @}
 
     // Prepare the callback for asynchronous execution. sp<ExecutionCallback>
     // object is returned when the execution has been successfully launched,
@@ -1052,14 +1136,16 @@ int StepExecutor::startComputeOnCpu(sp<ExecutionCallback>* synchronizationCallba
     setRequestArgumentArray(mInputs, &request.inputs);
     setRequestArgumentArray(mOutputs, &request.outputs);
 
+    /// M: Profiler @{
     if (DeviceManager::get()->syncExecCpu()) {
-        computeOnCpu(model, request, modelPoolInfos, requestPoolInfos, executionCallback);
+        computeOnCpuExt(model, request, modelPoolInfos, requestPoolInfos, executionCallback, this);
     } else {
         // TODO: should model be moved with a std::cref?
-        std::thread thread(computeOnCpu, model, std::move(request), std::move(modelPoolInfos),
-                           std::move(requestPoolInfos), executionCallback);
+        std::thread thread(computeOnCpuExt, model, std::move(request), std::move(modelPoolInfos),
+                           std::move(requestPoolInfos), executionCallback, this);
         executionCallback->bindThread(std::move(thread));
     }
+    /// M: Profiler @}
 
     *synchronizationCallback = executionCallback;
     return ANEURALNETWORKS_NO_ERROR;
